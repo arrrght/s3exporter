@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  labels:
+    {{- include "s3exporter.labels" . | nindent 4 }}
+  name: {{ include "s3exporter.fullname" . }}
+spec:
+  module: tmod1
+  interval: 10s
+  prober:
+    url: {{ include "s3exporter.fullname" . }}.{{- .Release.Namespace }}:8080
+  targets:
+    staticConfig:
+      static:
+        - bucket=db-backups,prefix=mysql/k8production,region=region1
+        - bucket=db-backups,prefix=mysql/testing,region=region2
+        - bucket=db-backups,prefix=mysql/staging,region=region2
+        - bucket=db-backups,prefix=postgres/k8production,region=region2
+        - bucket=db-backups,prefix=postgres/experimental/testing,region=region2
+        - bucket=db-backups,prefix=postgres/experimental/staging,region=region2

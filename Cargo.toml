@@ -1,0 +1,23 @@
+[package]
+name = "s3exporter"
+version = "0.1.0"
+authors = ["a3r.ght <arrrght@gmail.com>"]
+edition = "2018"
+
+[[bin]]
+name = "s3exporter"
+path = "src/main.rs"
+
+[dependencies]
+chrono = "0.4"
+env_logger = "0.8.2"
+futures = "0.3"
+log = "0.4.0"
+rusoto_core = { version = "0.46.0", default_features = false, features = [ "rustls" ]}
+rusoto_credential = { version = "0.46.0" }
+rusoto_s3 = { version = "0.46.0", default_features = false, features = [ "rustls" ]}
+serde = "1.0"
+serde_derive = "1.0"
+serde_urlencoded = "0.7"
+tokio = { version = "1.0",  features = ["full"] }
+warp = "0.3"

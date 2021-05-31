@@ -1,0 +1,8 @@
+serviceAccount:
+    create: false
+    annotations: {}
+    name: default
+envs:
+    AWS_ACCESS_KEY_ID: XXXX
+    AWS_SECRET_ACCESS_KEY: YYYY
+    RUST_LOG: requests

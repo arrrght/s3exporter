@@ -1,0 +1,7 @@
+creation_rules:
+  - encrypted_regex: ^(.*KEY_ID|.*ACCESS_KEY)$
+    path_regex: (values|values-testing|values-feature)\.yaml$
+    kms: arn:aws:kms:eu-north-1:IDTESTING:key/XXXX
+  - encrypted_regex: ^(.*KEY_ID|.*ACCESS_KEY)$
+    path_regex: (values-staging|values-production)\.yaml$
+    kms: arn:aws:kms:eu-north-1:IDPRODUCTION:key/YYYY

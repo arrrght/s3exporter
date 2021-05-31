@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    {{- include "s3exporter.labels" . | nindent 4 }}
+    app: kube-prometheus-stack
+    release: monitoring
+  name: mst-backups-checks
+spec:
+  groups:
+  - name: mygroup
+    rules:
+    - alert: BackupTime
+      expr: (time() - s3exp_date) / 3600 > 30
+      for: 1m
+      labels:
+        severity: warning
+      annotations:
+        message: {{`Backup date in bucket {{$labels.bucket}} with prefix {{$labels.prefix}} older than {{ printf "%0.0f" $value }} hours`}}

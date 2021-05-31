@@ -1,0 +1,4 @@
+envs:
+    AWS_ACCESS_KEY_ID: XXXXXX
+    AWS_SECRET_ACCESS_KEY: YYYYY
+    RUST_LOG: debug

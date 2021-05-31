@@ -1,0 +1,158 @@
+stages:
+  - validate
+  - build
+  - deploy
+  - destroy
+
+workflow:
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+variables:
+  IMAGE_KUBECTL: mygitlab.ms4.work:5005/infrastructure/images/kubectl:v1.18.8-kustomize-3.8.2-helm-3.3.1-sops-v3.6.1
+
+Check YML:
+  image: python:3.8-alpine3.11
+  stage: validate
+  tags: [ docker-asg ]
+  script:
+    - pip install yamllint==1.22.0
+    - yamllint -d .yamllint.yml .yamllint.yml .gitlab-ci.yml
+
+Lint Helm:
+  image: $IMAGE_KUBECTL
+  stage: validate
+  tags: [ docker-asg ]
+  script:
+    - cd ops/helm
+    - for i in values-*; do
+      echo "Checking file $i";
+      helm template some . --values values.yaml,$i | kubeval --ignore-missing-schemas --strict;
+      done
+
+Build release:
+  image: docker:stable
+  stage: build
+  tags: [ docker-asg ]
+  script:
+    - echo ${CI_JOB_TOKEN} | docker login -u gitlab-ci-token --password-stdin ${CI_REGISTRY}
+    - >
+      BUILD_INFO="$(date -Is) $CI_PROJECT_PATH $CI_COMMIT_REF_SLUG $CI_COMMIT_SHA
+        Pipeline[$CI_PIPELINE_ID] Build[$CI_BUILD_ID] [$GITLAB_USER_LOGIN]
+        Runner[$CI_RUNNER_ID:$CI_RUNNER_DESCRIPTION]"
+    - docker build
+      --file ./ops/docker/Dockerfile
+      --build-arg buildInfo="$BUILD_INFO"
+      --target=rdy
+      --tag=${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}
+      .
+    - docker push ${CI_REGISTRY_IMAGE}:${CI_COMMIT_REF_SLUG}
+
+#################
+# Helm deploy
+#################
+
+.K8Deploy template:
+  image: $IMAGE_KUBECTL
+  tags: [ docker-asg ]
+  before_script:
+    - mkdir -p ~/.kube
+    - aws s3 cp s3://${CLUSTER_CONFIG} ~/.kube/config
+
+.K8Deploy environment:
+  stage: deploy
+  extends: .K8Deploy template
+  script:
+    - cd ops/helm
+    - echo "Decrypt values file on ${CI_ENVIRONMENT_NAME%%/*}"
+    - sops --decrypt --in-place values.yaml || true
+    - sops --decrypt --in-place values-${CI_ENVIRONMENT_NAME%%/*}.yaml
+    - echo "Installing helm chart"
+    - sed -i "s/APPVERSION/${CI_COMMIT_TAG:-${CI_ENVIRONMENT_NAME%%/*}}/" Chart.yaml
+    - helm upgrade --install --namespace ${CI_ENVIRONMENT_NAME%%/*} s3exporter .
+      --values values.yaml,values-${CI_ENVIRONMENT_NAME%%/*}.yaml
+      --set image.repository=$CI_REGISTRY_IMAGE
+      --set image.tag=$CI_COMMIT_REF_SLUG
+      || FAILED=true
+    - helm history --namespace ${CI_ENVIRONMENT_NAME%%/*} s3exporter
+    - if [ $FAILED ]; then
+        echo "DEPLOY FAILED"; exit 1;
+      else
+        echo "Waiting for rollout";
+        kubectl -n ${CI_ENVIRONMENT_NAME%%/*} rollout status deployment s3exporter;
+      fi
+
+Production:
+  extends: .K8Deploy environment
+  when: manual
+  environment:
+    name: production
+  only:
+    - /^v[0-9.]{1,8}$/
+  variables:
+    CLUSTER_CONFIG: production-kubeconfigs/admin-config.yml
+
+Staging:
+  extends: .K8Deploy environment
+  when: manual
+  environment:
+    name: staging
+  only:
+    - /^v[0-9.]{1,8}[.-](alpha|beta|rc)[0-9]{1,3}$/
+  variables:
+    CLUSTER_CONFIG: staging-kubeconfigs/admin-config.yml
+
+Testing:
+  extends: .K8Deploy environment
+  environment:
+    name: testing
+  only: [ develop ]
+  variables:
+    CLUSTER_CONFIG: testing-kubeconfigs/admin-config.yml
+
+.K8Feature:
+  extends: .K8Deploy template
+  only: [ merge_requests ]
+  environment:
+    name: s3exporter/${CI_COMMIT_REF_NAME}
+  variables:
+    CLUSTER_CONFIG: testing-kubeconfigs/developers-feature-config.yml
+    AWS_ACCESS_KEY_ID: FEATURE_KEY
+    AWS_SECRET_ACCESS_KEY: FEATURE_ACCESS
+
+Deploy Feature:
+  stage: deploy
+  environment:
+    auto_stop_in: 1 week
+    on_stop: Destroy Feature
+  extends: .K8Feature
+  script:
+    - cd ops/helm
+    - echo "Decrypt feature values file"
+    - sops --decrypt --in-place values.yaml || true
+    - sops --decrypt --in-place values-feature.yaml || true
+    - sed -i "s/APPVERSION/${CI_ENVIRONMENT_SLUG}/" Chart.yaml
+    - helm upgrade --install --namespace feature ${CI_ENVIRONMENT_SLUG} .
+      --values values.yaml,values-feature.yaml
+      --set image.repository=$CI_REGISTRY_IMAGE
+      --set image.tag=$CI_COMMIT_REF_SLUG
+      || FAILED=true
+    - helm history --namespace feature $CI_ENVIRONMENT_SLUG
+    - if [ $FAILED ]; then
+        echo "DEPLOY FAILED"; exit 1;
+      else
+        echo "Waiting for rollout";
+        kubectl -n feature rollout status deployment ${CI_ENVIRONMENT_SLUG};
+      fi
+
+Destroy Feature:
+  extends: .K8Feature
+  stage: destroy
+  when: manual
+  environment:
+    action: stop
+  script:
+    - cd ops/helm
+    - helm uninstall --namespace feature $CI_ENVIRONMENT_SLUG

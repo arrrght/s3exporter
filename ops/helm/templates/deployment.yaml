@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "s3exporter.fullname" . }}
+  labels: {{- include "s3exporter.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {{- include "s3exporter.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "s3exporter.selectorLabels" . | nindent 8 }}
+      annotations: { roll-me-out: {{ randAlphaNum 5 | quote }} }
+    spec:
+      imagePullSecrets: [ name: registry-pull ]
+      serviceAccountName: {{ include "s3exporter.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+
+        - name: app
+          env:
+          {{- range $key, $val := .Values.envs }}
+            - { name: {{ $key }}, value: "{{- $val -}}" }
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports: [{ name: probe, containerPort: 8080, protocol: TCP }]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
